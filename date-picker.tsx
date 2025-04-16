@@ -4,18 +4,266 @@ import type React from "react"
 import { useState, useEffect, useRef, type KeyboardEvent, useCallback } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { createPortal } from "react-dom"
+import styled from "styled-components"
+import moment from "moment"
+import type { Moment } from "moment"
+
+// Styled components
+const DatePickerContainer = styled.div`
+  position: relative;
+  display: inline-block;
+  width: ${(props) => props.width || "auto"};
+`
+
+// Update the DatePickerInput focus style
+const DatePickerInput = styled.button<{ $disabled?: boolean }>`
+  width: 100%;
+  padding: 0.5rem 1rem;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #4338ca; /* Darker indigo color with higher contrast */
+    border-color: #4338ca;
+  }
+  
+  ${(props) =>
+    props.$disabled &&
+    `
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f1f5f9;
+  `}
+`
+
+const CalendarPopup = styled.div`
+  position: absolute;
+  z-index: 10;
+  margin-top: 0.25rem;
+  background-color: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  padding: 1rem;
+  width: 336px;
+`
+
+const CalendarHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+`
+
+// Update the IconButton and MonthYearButton focus styles
+const IconButton = styled.button`
+  padding: 0.5rem;
+  border-radius: 9999px;
+  
+  &:hover {
+    background-color: #f1f5f9;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #4338ca; /* Darker indigo color with higher contrast */
+  }
+`
+
+const MonthYearButton = styled.button`
+  font-size: 1.125rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  
+  &:hover {
+    background-color: #f1f5f9;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #4338ca; /* Darker indigo color with higher contrast */
+  }
+`
+
+const WeekdaysGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+`
+
+const WeekdayLabel = styled.div`
+  height: 2.5rem;
+  width: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+`
+
+const DaysGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.25rem;
+`
+
+const YearsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+`
+
+// Update the DayButton focus style
+const DayButton = styled.button<{
+  $isCurrentDay?: boolean
+  $isToday?: boolean
+  $isDisabled?: boolean
+  $isAdjacentMonth?: boolean
+}>`
+  height: 2.5rem;
+  width: 2.5rem;
+  border-radius: 0.375rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #4338ca; /* Darker indigo color with higher contrast */
+    position: relative;
+    z-index: 1; /* Ensure focus ring is visible */
+  }
+  
+  ${(props) =>
+    props.$isCurrentDay &&
+    `
+    background-color: #0f172a;
+    color: white;
+    
+    &:hover {
+      background-color: #1e293b;
+    }
+  `}
+  
+  ${(props) =>
+    !props.$isCurrentDay &&
+    !props.$isDisabled &&
+    !props.$isAdjacentMonth &&
+    `
+    &:hover {
+      background-color: #f1f5f9;
+    }
+  `}
+  
+  ${(props) =>
+    props.$isToday &&
+    !props.$isCurrentDay &&
+    `
+    border: 1px solid #94a3b8;
+  `}
+  
+  ${(props) =>
+    props.$isDisabled &&
+    `
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f1f5f9;
+    
+    &:hover {
+      background-color: #f1f5f9;
+    }
+  `}
+  
+  ${(props) =>
+    props.$isAdjacentMonth &&
+    `
+    color: #cbd5e1;
+  `}
+`
+
+// Update the YearButton focus style
+const YearButton = styled.button<{ $isCurrentYear?: boolean; $isThisYear?: boolean }>`
+  height: 4rem;
+  width: 4rem;
+  border-radius: 0.375rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #4338ca; /* Darker indigo color with higher contrast */
+    position: relative;
+    z-index: 1; /* Ensure focus ring is visible */
+  }
+  
+  ${(props) =>
+    props.$isCurrentYear &&
+    `
+    background-color: #0f172a;
+    color: white;
+    
+    &:hover {
+      background-color: #1e293b;
+    }
+  `}
+  
+  ${(props) =>
+    !props.$isCurrentYear &&
+    `
+    &:hover {
+      background-color: #f1f5f9;
+    }
+  `}
+  
+  ${(props) =>
+    props.$isThisYear &&
+    !props.$isCurrentYear &&
+    `
+    border: 1px solid #94a3b8;
+  `}
+`
+
+// Update the TodayButton focus style
+const TodayButton = styled.button`
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: #334155;
+  border-radius: 0.375rem;
+  
+  &:hover {
+    background-color: #f1f5f9;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #4338ca; /* Darker indigo color with higher contrast */
+  }
+`
+
+const FooterContainer = styled.div`
+  margin-top: 1rem;
+  text-align: right;
+`
 
 interface DatePickerProps extends React.HTMLAttributes<HTMLDivElement> {
-  value?: Date
-  onChange?: (date: Date) => void
+  value?: Moment | string
+  onChange?: (date: Moment) => void
   className?: string
-  // New props
   disabled?: boolean
-  disabledDate?: (date: Date) => boolean
-  format?: string | ((date: Date) => string)
-  dateRender?: (date: Date, today: Date) => React.ReactNode
+  disabledDate?: (date: Moment) => boolean
+  format?: string
+  dateRender?: (date: Moment, today: Moment) => React.ReactNode
   showToday?: boolean
   getCalendarContainer?: () => HTMLElement
+  width?: string
 }
 
 type ViewMode = "calendar" | "year"
@@ -26,14 +274,29 @@ export default function DatePicker({
   className = "",
   disabled = false,
   disabledDate,
-  format,
+  format = "MMMM D, YYYY",
   dateRender,
   showToday = true,
   getCalendarContainer,
+  width,
   ...restProps
 }: DatePickerProps) {
-  const [currentDate, setCurrentDate] = useState(value || new Date())
-  const [viewDate, setViewDate] = useState(new Date(currentDate))
+  // Parse string or moment to moment object
+  const parseDate = (dateValue: Moment | string | undefined): Moment => {
+    if (!dateValue) {
+      return moment()
+    }
+
+    if (typeof dateValue === "string") {
+      const parsedDate = moment(dateValue)
+      return parsedDate.isValid() ? parsedDate : moment()
+    }
+
+    return dateValue
+  }
+
+  const [currentDate, setCurrentDate] = useState(parseDate(value))
+  const [viewDate, setViewDate] = useState(moment(currentDate))
   const [isOpen, setIsOpen] = useState(false)
   const [focusedDay, setFocusedDay] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>("calendar")
@@ -52,51 +315,19 @@ export default function DatePicker({
     }
   }, [getCalendarContainer])
 
-  // Get days in month
-  const getDaysInMonth = (year: number, month: number) => {
-    return new Date(year, month + 1, 0).getDate()
-  }
-
-  // Get day of week for first day of month (0 = Sunday, 6 = Saturday)
-  const getFirstDayOfMonth = (year: number, month: number) => {
-    return new Date(year, month, 1).getDay()
-  }
-
   // Format date as string
-  const formatDate = (date: Date) => {
-    if (format) {
-      if (typeof format === "function") {
-        return format(date)
-      }
-
-      // Simple format implementation
-      return format
-        .replace("YYYY", date.getFullYear().toString())
-        .replace("MM", (date.getMonth() + 1).toString().padStart(2, "0"))
-        .replace("DD", date.getDate().toString().padStart(2, "0"))
-        .replace("M", (date.getMonth() + 1).toString())
-        .replace("D", date.getDate().toString())
-    }
-
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    })
+  const formatDate = (date: Moment) => {
+    return date.format(format)
   }
 
   // Check if two dates are the same day
-  const isSameDay = (date1: Date, date2: Date) => {
-    return (
-      date1.getFullYear() === date2.getFullYear() &&
-      date1.getMonth() === date2.getMonth() &&
-      date1.getDate() === date2.getDate()
-    )
+  const isSameDay = (date1: Moment, date2: Moment) => {
+    return date1.isSame(date2, "day")
   }
 
   // Check if a date is disabled
   const isDateDisabled = useCallback(
-    (date: Date) => {
+    (date: Moment) => {
       if (disabledDate) {
         return disabledDate(date)
       }
@@ -107,7 +338,7 @@ export default function DatePicker({
 
   // Handle date selection
   const handleSelectDate = (day: number) => {
-    const newDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), day)
+    const newDate = moment(viewDate).date(day)
 
     // Don't select if date is disabled
     if (isDateDisabled(newDate)) {
@@ -121,30 +352,30 @@ export default function DatePicker({
 
   // Handle year selection
   const handleSelectYear = (year: number) => {
-    setViewDate(new Date(year, viewDate.getMonth(), 1))
+    setViewDate(moment(viewDate).year(year))
     setViewMode("calendar")
   }
 
   // Navigate to previous month
   const prevMonth = () => {
-    setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))
+    setViewDate(moment(viewDate).subtract(1, "month"))
     setFocusedDay(null)
   }
 
   // Navigate to next month
   const nextMonth = () => {
-    setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))
+    setViewDate(moment(viewDate).add(1, "month"))
     setFocusedDay(null)
   }
 
   // Navigate to previous year set
   const prevYearSet = () => {
-    setViewDate(new Date(viewDate.getFullYear() - 12, viewDate.getMonth(), 1))
+    setViewDate(moment(viewDate).subtract(12, "year"))
   }
 
   // Navigate to next year set
   const nextYearSet = () => {
-    setViewDate(new Date(viewDate.getFullYear() + 12, viewDate.getMonth(), 1))
+    setViewDate(moment(viewDate).add(12, "year"))
   }
 
   // Handle keyboard navigation
@@ -156,13 +387,13 @@ export default function DatePicker({
       return
     }
 
-    const daysInMonth = getDaysInMonth(viewDate.getFullYear(), viewDate.getMonth())
-    const firstDayOfMonth = getFirstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())
+    const daysInMonth = viewDate.daysInMonth()
+    const firstDayOfMonth = moment(viewDate).startOf("month").day()
 
     // If no day is focused yet, focus on the current day or first day
     if (focusedDay === null) {
-      if (viewDate.getMonth() === currentDate.getMonth() && viewDate.getFullYear() === currentDate.getFullYear()) {
-        setFocusedDay(currentDate.getDate())
+      if (viewDate.month() === currentDate.month() && viewDate.year() === currentDate.year()) {
+        setFocusedDay(currentDate.date())
       } else {
         setFocusedDay(1)
       }
@@ -176,8 +407,9 @@ export default function DatePicker({
           setFocusedDay(focusedDay - 1)
         } else {
           // Go to previous month, last day
+          const prevMonthDate = moment(viewDate).subtract(1, "month")
+          const prevMonthDays = prevMonthDate.daysInMonth()
           prevMonth()
-          const prevMonthDays = getDaysInMonth(viewDate.getFullYear(), viewDate.getMonth() - 1)
           setFocusedDay(prevMonthDays)
         }
         break
@@ -197,8 +429,9 @@ export default function DatePicker({
           setFocusedDay(focusedDay - 7)
         } else {
           // Go to previous month
+          const prevMonthDate = moment(viewDate).subtract(1, "month")
+          const prevMonthDays = prevMonthDate.daysInMonth()
           prevMonth()
-          const prevMonthDays = getDaysInMonth(viewDate.getFullYear(), viewDate.getMonth() - 1)
           const newDay = prevMonthDays - (7 - focusedDay)
           setFocusedDay(newDay > 0 ? newDay : prevMonthDays)
         }
@@ -209,9 +442,10 @@ export default function DatePicker({
           setFocusedDay(focusedDay + 7)
         } else {
           // Go to next month
-          nextMonth()
+          const nextMonthDate = moment(viewDate).add(1, "month")
           const newDay = focusedDay + 7 - daysInMonth
-          setFocusedDay(newDay <= getDaysInMonth(viewDate.getFullYear(), viewDate.getMonth() + 1) ? newDay : 1)
+          nextMonth()
+          setFocusedDay(newDay <= nextMonthDate.daysInMonth() ? newDay : 1)
         }
         break
       case "Home":
@@ -250,7 +484,7 @@ export default function DatePicker({
 
   // Handle keyboard navigation for year view
   const handleYearKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const startYear = viewDate.getFullYear() - (viewDate.getFullYear() % 12)
+    const startYear = viewDate.year() - (viewDate.year() % 12)
     const focusedYearIndex = yearsRef.current.findIndex((ref) => document.activeElement === ref)
     const focusedYear = focusedYearIndex !== -1 ? startYear + focusedYearIndex : startYear
 
@@ -346,7 +580,7 @@ export default function DatePicker({
 
   // Reset refs when month changes
   useEffect(() => {
-    daysRef.current = daysRef.current.slice(0, getDaysInMonth(viewDate.getFullYear(), viewDate.getMonth()))
+    daysRef.current = daysRef.current.slice(0, viewDate.daysInMonth())
     yearsRef.current = new Array(12).fill(null)
   }, [viewDate])
 
@@ -360,90 +594,71 @@ export default function DatePicker({
   // Update current date when value prop changes
   useEffect(() => {
     if (value) {
-      setCurrentDate(value)
-      setViewDate(new Date(value))
+      const parsedDate = parseDate(value)
+      setCurrentDate(parsedDate)
+      setViewDate(moment(parsedDate))
     }
   }, [value])
 
   // Render calendar days
   const renderCalendarDays = () => {
-    const daysInMonth = getDaysInMonth(viewDate.getFullYear(), viewDate.getMonth())
-    const firstDayOfMonth = getFirstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())
-    const today = new Date()
+    const daysInMonth = viewDate.daysInMonth()
+    const firstDayOfMonth = moment(viewDate).startOf("month").day()
+    const today = moment()
     const days = []
 
     // Add days from previous month
-    const prevMonthDays = getDaysInMonth(
-      viewDate.getMonth() === 0 ? viewDate.getFullYear() - 1 : viewDate.getFullYear(),
-      viewDate.getMonth() === 0 ? 11 : viewDate.getMonth() - 1,
-    )
+    const prevMonth = moment(viewDate).subtract(1, "month")
+    const prevMonthDays = prevMonth.daysInMonth()
 
     for (let i = 0; i < firstDayOfMonth; i++) {
       const day = prevMonthDays - firstDayOfMonth + i + 1
-      const date = new Date(
-        viewDate.getMonth() === 0 ? viewDate.getFullYear() - 1 : viewDate.getFullYear(),
-        viewDate.getMonth() === 0 ? 11 : viewDate.getMonth() - 1,
-        day,
-      )
+      const date = moment(prevMonth).date(day)
 
       days.push(
-        <button
-          key={`prev-${day}`}
-          disabled
-          className="h-10 w-10 rounded-md flex items-center justify-center text-slate-300"
-          aria-hidden="true"
-        >
+        <DayButton key={`prev-${day}`} disabled $isAdjacentMonth aria-hidden="true">
           {dateRender ? dateRender(date, today) : day}
-        </button>,
+        </DayButton>,
       )
     }
 
     // Add days of the current month
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(viewDate.getFullYear(), viewDate.getMonth(), day)
+      const date = moment(viewDate).date(day)
       const isCurrentDay = isSameDay(date, currentDate)
       const isToday = isSameDay(date, today)
       const isDisabled = isDateDisabled(date)
 
       days.push(
-        <button
+        <DayButton
           key={day}
           ref={(el) => (daysRef.current[day - 1] = el)}
           onClick={() => handleSelectDate(day)}
           disabled={isDisabled}
-          className={`h-10 w-10 rounded-md flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 
-            ${isCurrentDay ? "bg-slate-900 text-white hover:bg-slate-700" : "hover:bg-slate-100"} 
-            ${isToday && !isCurrentDay ? "border border-slate-400" : ""}
-            ${isDisabled ? "opacity-50 cursor-not-allowed bg-slate-100 hover:bg-slate-100" : ""}`}
+          $isCurrentDay={isCurrentDay}
+          $isToday={isToday}
+          $isDisabled={isDisabled}
           aria-selected={isCurrentDay}
           aria-current={isToday ? "date" : undefined}
           aria-disabled={isDisabled}
         >
           {dateRender ? dateRender(date, today) : day}
-        </button>,
+        </DayButton>,
       )
     }
 
     // Add days from next month
     const totalCells = 42 // 6 rows of 7 days
     const nextMonthDays = totalCells - days.length
+    const nextMonth = moment(viewDate).add(1, "month")
 
     for (let day = 1; day <= nextMonthDays; day++) {
-      const date = new Date(
-        viewDate.getMonth() === 11 ? viewDate.getFullYear() + 1 : viewDate.getFullYear(),
-        viewDate.getMonth() === 11 ? 0 : viewDate.getMonth() + 1,
-        day,
-      )
+      const date = moment(nextMonth).date(day)
 
       days.push(
-        <button
-          key={`next-${day}`}
-          disabled
-          className="h-10 w-10 rounded-md flex items-center justify-center text-slate-300"
-          aria-hidden="true"
-        >
+        <DayButton key={`next-${day}`} disabled $isAdjacentMonth aria-hidden="true">
           {dateRender ? dateRender(date, today) : day}
-        </button>,
+        </DayButton>,
       )
     }
 
@@ -452,27 +667,27 @@ export default function DatePicker({
 
   // Render year selection
   const renderYearSelection = () => {
-    const startYear = viewDate.getFullYear() - (viewDate.getFullYear() % 12)
+    const currentYear = viewDate.year()
+    const startYear = currentYear - (currentYear % 12)
     const years = []
-    const today = new Date()
+    const today = moment()
 
     for (let i = 0; i < 12; i++) {
       const year = startYear + i
-      const isCurrentYear = year === currentDate.getFullYear()
-      const isThisYear = year === today.getFullYear()
+      const isCurrentYear = year === currentDate.year()
+      const isThisYear = year === today.year()
 
       years.push(
-        <button
+        <YearButton
           key={year}
           ref={(el) => (yearsRef.current[i] = el)}
           onClick={() => handleSelectYear(year)}
-          className={`h-16 w-16 rounded-md flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 
-            ${isCurrentYear ? "bg-slate-900 text-white hover:bg-slate-700" : "hover:bg-slate-100"}
-            ${isThisYear && !isCurrentYear ? "border border-slate-400" : ""}`}
+          $isCurrentYear={isCurrentYear}
+          $isThisYear={isThisYear}
           aria-selected={isCurrentYear}
         >
           {year}
-        </button>,
+        </YearButton>,
       )
     }
 
@@ -482,82 +697,69 @@ export default function DatePicker({
   // Render the calendar popup
   const renderCalendarPopup = () => {
     const popup = (
-      <div
+      <CalendarPopup
         ref={calendarRef}
-        className="absolute z-10 mt-1 bg-white border rounded-md shadow-lg p-4 w-[336px]"
         onKeyDown={handleKeyDown}
         role="dialog"
         aria-modal="true"
         aria-label={viewMode === "calendar" ? "Calendar" : "Year selection"}
         tabIndex={-1}
       >
-        <div className="flex items-center justify-between mb-4">
-          <button
+        <CalendarHeader>
+          <IconButton
             type="button"
             onClick={viewMode === "calendar" ? prevMonth : prevYearSet}
-            className="p-2 hover:bg-slate-100 rounded-full"
             aria-label={viewMode === "calendar" ? "Previous month" : "Previous years"}
           >
             <ChevronLeft size={20} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode(viewMode === "calendar" ? "year" : "calendar")}
-            className="text-lg font-semibold px-2 py-1 hover:bg-slate-100 rounded-md"
-          >
+          </IconButton>
+          <MonthYearButton type="button" onClick={() => setViewMode(viewMode === "calendar" ? "year" : "calendar")}>
             {viewMode === "calendar"
-              ? viewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })
-              : `${viewDate.getFullYear() - (viewDate.getFullYear() % 12)} - ${viewDate.getFullYear() - (viewDate.getFullYear() % 12) + 11}`}
-          </button>
-          <button
+              ? viewDate.format("MMMM YYYY")
+              : `${viewDate.year() - (viewDate.year() % 12)} - ${viewDate.year() - (viewDate.year() % 12) + 11}`}
+          </MonthYearButton>
+          <IconButton
             type="button"
             onClick={viewMode === "calendar" ? nextMonth : nextYearSet}
-            className="p-2 hover:bg-slate-100 rounded-full"
             aria-label={viewMode === "calendar" ? "Next month" : "Next years"}
           >
             <ChevronRight size={20} />
-          </button>
-        </div>
+          </IconButton>
+        </CalendarHeader>
 
         {viewMode === "calendar" ? (
           <>
-            <div className="grid grid-cols-7 gap-1 mb-2">
+            <WeekdaysGrid>
               {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
-                <div
-                  key={day}
-                  className="h-10 w-10 flex items-center justify-center text-sm font-medium text-slate-500"
-                >
-                  {day}
-                </div>
+                <WeekdayLabel key={day}>{day}</WeekdayLabel>
               ))}
-            </div>
+            </WeekdaysGrid>
 
-            <div className="grid grid-cols-7 gap-1">{renderCalendarDays()}</div>
+            <DaysGrid>{renderCalendarDays()}</DaysGrid>
           </>
         ) : (
-          <div className="grid grid-cols-4 gap-2 py-2">{renderYearSelection()}</div>
+          <YearsGrid>{renderYearSelection()}</YearsGrid>
         )}
 
         {showToday && (
-          <div className="mt-4 text-right">
-            <button
+          <FooterContainer>
+            <TodayButton
               type="button"
               onClick={() => {
-                const today = new Date()
+                const today = moment()
                 if (!isDateDisabled(today)) {
                   setCurrentDate(today)
-                  setViewDate(today)
+                  setViewDate(moment(today))
                   onChange?.(today)
                   setIsOpen(false)
                 }
               }}
-              className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-md"
             >
               Today
-            </button>
-          </div>
+            </TodayButton>
+          </FooterContainer>
         )}
-      </div>
+      </CalendarPopup>
     )
 
     // Render in a portal if getCalendarContainer is provided
@@ -569,22 +771,20 @@ export default function DatePicker({
   }
 
   return (
-    <div className={`relative inline-block ${className}`} {...restProps}>
-      <button
+    <DatePickerContainer className={className} width={width} {...restProps}>
+      <DatePickerInput
         ref={inputRef}
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full px-4 py-2 text-left border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500 ${
-          disabled ? "opacity-50 cursor-not-allowed bg-slate-100" : ""
-        }`}
+        $disabled={disabled}
         aria-haspopup="true"
         aria-expanded={isOpen}
         disabled={disabled}
       >
         {formatDate(currentDate)}
-      </button>
+      </DatePickerInput>
 
       {isOpen && renderCalendarPopup()}
-    </div>
+    </DatePickerContainer>
   )
 }
