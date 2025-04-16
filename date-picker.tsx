@@ -4,9 +4,12 @@ import type React from "react"
 import { useState, useEffect, useRef, type KeyboardEvent, useCallback } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { createPortal } from "react-dom"
-import styled from "styled-components"
+import styled, { StyleSheetManager } from "styled-components"
 import moment from "moment"
 import type { Moment } from "moment"
+
+// 添加shouldForwardProp函数来解决styled-components警告
+const shouldForwardProp = (prop: string) => !prop.startsWith('$');
 
 // Styled components
 const DatePickerContainer = styled.div`
@@ -262,7 +265,6 @@ interface DatePickerProps extends React.HTMLAttributes<HTMLDivElement> {
   format?: string
   dateRender?: (date: Moment, today: Moment) => React.ReactNode
   showToday?: boolean
-  getCalendarContainer?: () => HTMLElement
   width?: string
 }
 
@@ -277,7 +279,6 @@ export default function DatePicker({
   format = "MMMM D, YYYY",
   dateRender,
   showToday = true,
-  getCalendarContainer,
   width,
   ...restProps
 }: DatePickerProps) {
@@ -296,24 +297,22 @@ export default function DatePicker({
   }
 
   const [currentDate, setCurrentDate] = useState(parseDate(value))
-  const [viewDate, setViewDate] = useState(moment(currentDate))
   const [isOpen, setIsOpen] = useState(false)
-  const [focusedDay, setFocusedDay] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>("calendar")
   const calendarRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLButtonElement>(null)
   const daysRef = useRef<(HTMLButtonElement | null)[]>([])
   const yearsRef = useRef<(HTMLButtonElement | null)[]>([])
-  const [popupContainer, setPopupContainer] = useState<HTMLElement | null>(null)
-
-  // Initialize popup container
-  useEffect(() => {
-    if (getCalendarContainer) {
-      setPopupContainer(getCalendarContainer())
-    } else {
-      setPopupContainer(null)
-    }
-  }, [getCalendarContainer])
+  
+  // 使用refs存储状态，避免不必要的重渲染
+  const currentDateRef = useRef<Moment>(currentDate)
+  const viewDateRef = useRef<Moment>(moment(currentDate))
+  const focusedDayRef = useRef<number | null>(null)
+  const viewModeRef = useRef<ViewMode>(viewMode)
+  
+  // 直接在渲染时更新refs，无需使用useEffect
+  currentDateRef.current = currentDate
+  viewModeRef.current = viewMode
 
   // Format date as string
   const formatDate = (date: Moment) => {
@@ -338,7 +337,7 @@ export default function DatePicker({
 
   // Handle date selection
   const handleSelectDate = (day: number) => {
-    const newDate = moment(viewDate).date(day)
+    const newDate = moment(viewDateRef.current).date(day)
 
     // Don't select if date is disabled
     if (isDateDisabled(newDate)) {
@@ -352,113 +351,157 @@ export default function DatePicker({
 
   // Handle year selection
   const handleSelectYear = (year: number) => {
-    setViewDate(moment(viewDate).year(year))
+    viewDateRef.current = moment(viewDateRef.current).year(year)
     setViewMode("calendar")
   }
 
   // Navigate to previous month
   const prevMonth = () => {
-    setViewDate(moment(viewDate).subtract(1, "month"))
-    setFocusedDay(null)
+    viewDateRef.current = moment(viewDateRef.current).subtract(1, "month")
+    focusedDayRef.current = null
+    // 强制重新渲染
+    setViewMode(prev => prev)
   }
 
   // Navigate to next month
   const nextMonth = () => {
-    setViewDate(moment(viewDate).add(1, "month"))
-    setFocusedDay(null)
+    viewDateRef.current = moment(viewDateRef.current).add(1, "month")
+    focusedDayRef.current = null
+    // 强制重新渲染
+    setViewMode(prev => prev)
   }
 
   // Navigate to previous year set
   const prevYearSet = () => {
-    setViewDate(moment(viewDate).subtract(12, "year"))
+    viewDateRef.current = moment(viewDateRef.current).subtract(12, "year")
+    // 强制重新渲染
+    setViewMode(prev => prev)
   }
 
   // Navigate to next year set
   const nextYearSet = () => {
-    setViewDate(moment(viewDate).add(12, "year"))
+    viewDateRef.current = moment(viewDateRef.current).add(12, "year")
+    // 强制重新渲染
+    setViewMode(prev => prev)
   }
 
   // Handle keyboard navigation
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!isOpen) return
 
-    if (viewMode === "year") {
+    if (viewModeRef.current === "year") {
       handleYearKeyDown(e)
       return
     }
 
-    const daysInMonth = viewDate.daysInMonth()
-    const firstDayOfMonth = moment(viewDate).startOf("month").day()
+    const daysInMonth = viewDateRef.current.daysInMonth()
+    const firstDayOfMonth = moment(viewDateRef.current).startOf("month").day()
 
     // If no day is focused yet, focus on the current day or first day
-    if (focusedDay === null) {
-      if (viewDate.month() === currentDate.month() && viewDate.year() === currentDate.year()) {
-        setFocusedDay(currentDate.date())
+    if (focusedDayRef.current === null) {
+      if (viewDateRef.current.month() === currentDateRef.current.month() && 
+          viewDateRef.current.year() === currentDateRef.current.year()) {
+        focusedDayRef.current = currentDateRef.current.date()
       } else {
-        setFocusedDay(1)
+        focusedDayRef.current = 1
       }
+      // 强制重新渲染
+      setViewMode(prev => prev)
+      return
+    }
+    
+    // Handle Tab key navigation
+    if (e.key === "Tab") {
+      // Allow normal tab navigation but track the focused element after the tab
+      setTimeout(() => {
+        const focusedElement = document.activeElement
+        const focusedIndex = daysRef.current.findIndex(ref => ref === focusedElement)
+        
+        if (focusedIndex !== -1) {
+          const focusedDayNumber = focusedIndex + 1
+          focusedDayRef.current = focusedDayNumber
+          // 强制重新渲染
+          setViewMode(prev => prev)
+        }
+      }, 0)
       return
     }
 
     switch (e.key) {
       case "ArrowLeft":
         e.preventDefault()
-        if (focusedDay > 1) {
-          setFocusedDay(focusedDay - 1)
+        if (focusedDayRef.current! > 1) {
+          focusedDayRef.current = focusedDayRef.current! - 1
+          // 强制重新渲染
+          setViewMode(prev => prev)
         } else {
           // Go to previous month, last day
-          const prevMonthDate = moment(viewDate).subtract(1, "month")
+          const prevMonthDate = moment(viewDateRef.current).subtract(1, "month")
           const prevMonthDays = prevMonthDate.daysInMonth()
           prevMonth()
-          setFocusedDay(prevMonthDays)
+          focusedDayRef.current = prevMonthDays
+          // 强制重新渲染已在prevMonth中处理
         }
         break
       case "ArrowRight":
         e.preventDefault()
-        if (focusedDay < daysInMonth) {
-          setFocusedDay(focusedDay + 1)
+        if (focusedDayRef.current! < daysInMonth) {
+          focusedDayRef.current = focusedDayRef.current! + 1
+          // 强制重新渲染
+          setViewMode(prev => prev)
         } else {
           // Go to next month, first day
           nextMonth()
-          setFocusedDay(1)
+          focusedDayRef.current = 1
+          // 强制重新渲染已在nextMonth中处理
         }
         break
       case "ArrowUp":
         e.preventDefault()
-        if (focusedDay > 7) {
-          setFocusedDay(focusedDay - 7)
+        if (focusedDayRef.current! > 7) {
+          focusedDayRef.current = focusedDayRef.current! - 7
+          // 强制重新渲染
+          setViewMode(prev => prev)
         } else {
           // Go to previous month
-          const prevMonthDate = moment(viewDate).subtract(1, "month")
+          const prevMonthDate = moment(viewDateRef.current).subtract(1, "month")
           const prevMonthDays = prevMonthDate.daysInMonth()
           prevMonth()
-          const newDay = prevMonthDays - (7 - focusedDay)
-          setFocusedDay(newDay > 0 ? newDay : prevMonthDays)
+          const newDay = prevMonthDays - (7 - focusedDayRef.current!)
+          focusedDayRef.current = newDay > 0 ? newDay : prevMonthDays
+          // 强制重新渲染已在prevMonth中处理
         }
         break
       case "ArrowDown":
         e.preventDefault()
-        if (focusedDay + 7 <= daysInMonth) {
-          setFocusedDay(focusedDay + 7)
+        if (focusedDayRef.current! + 7 <= daysInMonth) {
+          focusedDayRef.current = focusedDayRef.current! + 7
+          // 强制重新渲染
+          setViewMode(prev => prev)
         } else {
           // Go to next month
-          const nextMonthDate = moment(viewDate).add(1, "month")
-          const newDay = focusedDay + 7 - daysInMonth
+          const nextMonthDate = moment(viewDateRef.current).add(1, "month")
+          const newDay = focusedDayRef.current! + 7 - daysInMonth
           nextMonth()
-          setFocusedDay(newDay <= nextMonthDate.daysInMonth() ? newDay : 1)
+          focusedDayRef.current = newDay <= nextMonthDate.daysInMonth() ? newDay : 1
+          // 强制重新渲染已在nextMonth中处理
         }
         break
       case "Home":
         e.preventDefault()
         // Go to first day of current week
-        const currentWeekStart = focusedDay - ((focusedDay - 1) % 7)
-        setFocusedDay(currentWeekStart)
+        const currentWeekStart = focusedDayRef.current! - ((focusedDayRef.current! - 1) % 7)
+        focusedDayRef.current = currentWeekStart
+        // 强制重新渲染
+        setViewMode(prev => prev)
         break
       case "End":
         e.preventDefault()
         // Go to last day of current week
-        const currentWeekEnd = Math.min(focusedDay + (7 - (focusedDay % 7)), daysInMonth)
-        setFocusedDay(currentWeekEnd === 0 ? 7 : currentWeekEnd)
+        const currentWeekEnd = Math.min(focusedDayRef.current! + (7 - (focusedDayRef.current! % 7)), daysInMonth)
+        focusedDayRef.current = currentWeekEnd === 0 ? 7 : currentWeekEnd
+        // 强制重新渲染
+        setViewMode(prev => prev)
         break
       case "PageUp":
         e.preventDefault()
@@ -471,7 +514,10 @@ export default function DatePicker({
       case "Enter":
       case " ":
         e.preventDefault()
-        handleSelectDate(focusedDay)
+        // Make sure we're selecting the currently focused day
+        if (focusedDayRef.current !== null) {
+          handleSelectDate(focusedDayRef.current)
+        }
         break
       case "Escape":
         e.preventDefault()
@@ -484,7 +530,7 @@ export default function DatePicker({
 
   // Handle keyboard navigation for year view
   const handleYearKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const startYear = viewDate.year() - (viewDate.year() % 12)
+    const startYear = viewDateRef.current.year() - (viewDateRef.current.year() % 12)
     const focusedYearIndex = yearsRef.current.findIndex((ref) => document.activeElement === ref)
     const focusedYear = focusedYearIndex !== -1 ? startYear + focusedYearIndex : startYear
 
@@ -525,7 +571,8 @@ export default function DatePicker({
       case " ":
         e.preventDefault()
         if (focusedYearIndex !== -1) {
-          handleSelectYear(startYear + focusedYearIndex)
+          const selectedYear = startYear + focusedYearIndex
+          handleSelectYear(selectedYear)
         }
         break
       case "Escape":
@@ -549,15 +596,15 @@ export default function DatePicker({
     }
   }
 
-  // Focus the button for the focused day
+  // Focus the button for the focused day - 保留这个useEffect因为它处理DOM焦点
   useEffect(() => {
-    if (focusedDay !== null && isOpen && viewMode === "calendar") {
-      const index = focusedDay - 1
+    if (focusedDayRef.current !== null && isOpen && viewMode === "calendar") {
+      const index = focusedDayRef.current - 1
       if (daysRef.current[index]) {
         daysRef.current[index]?.focus()
       }
     }
-  }, [focusedDay, isOpen, viewMode])
+  }, [isOpen, viewMode])
 
   // Close the calendar when clicking outside
   useEffect(() => {
@@ -578,11 +625,11 @@ export default function DatePicker({
     }
   }, [])
 
-  // Reset refs when month changes
+  // Reset refs when viewMode changes (作为viewDate变化的替代触发器)
   useEffect(() => {
-    daysRef.current = daysRef.current.slice(0, viewDate.daysInMonth())
+    daysRef.current = daysRef.current.slice(0, viewDateRef.current.daysInMonth())
     yearsRef.current = new Array(12).fill(null)
-  }, [viewDate])
+  }, [viewMode])
 
   // Reset view mode when closing
   useEffect(() => {
@@ -596,24 +643,24 @@ export default function DatePicker({
     if (value) {
       const parsedDate = parseDate(value)
       setCurrentDate(parsedDate)
-      setViewDate(moment(parsedDate))
+      viewDateRef.current = moment(parsedDate)
     }
   }, [value])
 
   // Render calendar days
   const renderCalendarDays = () => {
-    const daysInMonth = viewDate.daysInMonth()
-    const firstDayOfMonth = moment(viewDate).startOf("month").day()
+    const daysInMonth = viewDateRef.current.daysInMonth()
+    const firstDayOfMonth = moment(viewDateRef.current).startOf("month").day()
     const today = moment()
     const days = []
 
     // Add days from previous month
-    const prevMonth = moment(viewDate).subtract(1, "month")
-    const prevMonthDays = prevMonth.daysInMonth()
+    const prevMonthView = moment(viewDateRef.current).subtract(1, "month")
+    const prevMonthDays = prevMonthView.daysInMonth()
 
     for (let i = 0; i < firstDayOfMonth; i++) {
       const day = prevMonthDays - firstDayOfMonth + i + 1
-      const date = moment(prevMonth).date(day)
+      const date = moment(prevMonthView).date(day)
 
       days.push(
         <DayButton key={`prev-${day}`} disabled $isAdjacentMonth aria-hidden="true">
@@ -624,8 +671,8 @@ export default function DatePicker({
 
     // Add days of the current month
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = moment(viewDate).date(day)
-      const isCurrentDay = isSameDay(date, currentDate)
+      const date = moment(viewDateRef.current).date(day)
+      const isCurrentDay = isSameDay(date, currentDateRef.current)
       const isToday = isSameDay(date, today)
       const isDisabled = isDateDisabled(date)
 
@@ -650,10 +697,10 @@ export default function DatePicker({
     // Add days from next month
     const totalCells = 42 // 6 rows of 7 days
     const nextMonthDays = totalCells - days.length
-    const nextMonth = moment(viewDate).add(1, "month")
+    const nextMonthView = moment(viewDateRef.current).add(1, "month")
 
     for (let day = 1; day <= nextMonthDays; day++) {
-      const date = moment(nextMonth).date(day)
+      const date = moment(nextMonthView).date(day)
 
       days.push(
         <DayButton key={`next-${day}`} disabled $isAdjacentMonth aria-hidden="true">
@@ -667,14 +714,14 @@ export default function DatePicker({
 
   // Render year selection
   const renderYearSelection = () => {
-    const currentYear = viewDate.year()
+    const currentYear = viewDateRef.current.year()
     const startYear = currentYear - (currentYear % 12)
     const years = []
     const today = moment()
 
     for (let i = 0; i < 12; i++) {
       const year = startYear + i
-      const isCurrentYear = year === currentDate.year()
+      const isCurrentYear = year === currentDateRef.current.year()
       const isThisYear = year === today.year()
 
       years.push(
@@ -713,10 +760,10 @@ export default function DatePicker({
           >
             <ChevronLeft size={20} />
           </IconButton>
-          <MonthYearButton type="button" onClick={() => setViewMode(viewMode === "calendar" ? "year" : "calendar")}>
-            {viewMode === "calendar"
-              ? viewDate.format("MMMM YYYY")
-              : `${viewDate.year() - (viewDate.year() % 12)} - ${viewDate.year() - (viewDate.year() % 12) + 11}`}
+          <MonthYearButton type="button" onClick={() => setViewMode(viewModeRef.current === "calendar" ? "year" : "calendar")}>
+            {viewModeRef.current === "calendar"
+              ? viewDateRef.current.format("MMMM YYYY")
+              : `${viewDateRef.current.year() - (viewDateRef.current.year() % 12)} - ${viewDateRef.current.year() - (viewDateRef.current.year() % 12) + 11}`}
           </MonthYearButton>
           <IconButton
             type="button"
@@ -761,30 +808,26 @@ export default function DatePicker({
         )}
       </CalendarPopup>
     )
-
-    // Render in a portal if getCalendarContainer is provided
-    if (popupContainer) {
-      return createPortal(popup, popupContainer)
-    }
-
     return popup
   }
 
   return (
-    <DatePickerContainer className={className} width={width} {...restProps}>
-      <DatePickerInput
-        ref={inputRef}
-        type="button"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        $disabled={disabled}
-        aria-haspopup="true"
-        aria-expanded={isOpen}
-        disabled={disabled}
-      >
-        {formatDate(currentDate)}
-      </DatePickerInput>
+    <StyleSheetManager shouldForwardProp={shouldForwardProp}>
+      <DatePickerContainer className={className} width={width} {...restProps}>
+        <DatePickerInput
+          ref={inputRef}
+          type="button"
+          onClick={() => !disabled && setIsOpen(!isOpen)}
+          $disabled={disabled}
+          aria-haspopup="true"
+          aria-expanded={isOpen}
+          disabled={disabled}
+        >
+          {formatDate(currentDate)}
+        </DatePickerInput>
 
-      {isOpen && renderCalendarPopup()}
-    </DatePickerContainer>
+        {isOpen && renderCalendarPopup()}
+      </DatePickerContainer>
+    </StyleSheetManager>
   )
 }
